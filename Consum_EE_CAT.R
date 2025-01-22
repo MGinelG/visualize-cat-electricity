@@ -110,7 +110,6 @@ consum_diari |>
   geom_line(linewidth=1.5) +
   scale_x_continuous(breaks = seq(2013, 2022, by = 1), 
                      limits=c(2013, 2022)) +
-  scale_y_log10() +
   labs(
     title = 'Evolucion del consumo por sector',
     subtitle = 'Salvo el descenso marcado por el COVID-19 no se observa tendencia generalizada al mismo',
@@ -128,7 +127,7 @@ consum_diari |>
   geom_line(linewidth=1.5) +
   scale_x_continuous(breaks = seq(2013, 2022, by = 1), 
                      limits=c(2013, 2022)) +
-  # scale_y_log10() +
+  scale_y_log10() +
   labs(
     title = 'Evolucion del consumo por sector',
     subtitle = 'Salvo el descenso marcado por el COVID-19 no se observa tendencia generalizada al mismo',
