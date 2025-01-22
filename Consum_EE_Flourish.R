@@ -74,6 +74,9 @@ capitales <-
     Capital = Municipi
   )
 
+# Fichero de puntos que cargaremos en los mapas de comarcas
+#
+
 write_csv(capitales, 'data/capitals_comarcals.csv')
 
 # Cargamos el fichero de geometrías municipales para homogeneizar el codigo
@@ -95,7 +98,8 @@ geometria |>
   full_join(municipios) |>
   filter(is.na(NOMMUNI) | is.na(Municipi))
 
-# reescribimos el fichero para su recarga en Flourish
+# reescribimos el fichero para su recarga en Flourish con los codigos de municipio
+# homogeneizados
 write_csv(geometria |>
             mutate(
               CODIMUNI = str_sub(str_pad(CODIMUNI, width = 6, pad = 0), end = 5)
@@ -148,6 +152,10 @@ censo <-    carga_censo('data/2861.csv', 2013, 2024) |>
 censo |>
   filter(!Codi_Municipi %in% municipios$Codi_Municipi)
 
+#
+# Realizamos un plot para ver la evolución del censo municipal
+#
+
 censo |>
   group_by(Any) |>
   summarise(Poblacion = trunc(sum(Habitants) / 1000)) |>
@@ -164,8 +172,22 @@ censo |>
     caption = 'Source: https://www.ine.es'
   )
 
-# añadimos al censo el código de comarca para realizar la agregacion
+# Añadimos a los municipios la poblaciona 1 de Enero de 2023
+#
+municipios <- municipios |>
+  left_join(censo |> 
+              filter(Any == 2022) |>
+              select(Codi_Municipi, Habitants)
+  )
 
+# Comprobamos la inexistencia de nans
+#
+municipios |> 
+  filter(is.na(Habitants))
+
+# añadimos al censo el código de comarca para realizar la agregacion y 
+# obtener el numero de habitantes comarcales
+#
 censo <- censo |>
   inner_join(municipios |>
                select(Codi_Municipi, Codi_Comarca))
@@ -180,6 +202,9 @@ censo_comarcal <- censo |>
   summarise(Habitants = sum(Habitants)) |>
   ungroup() 
 
+#
+# Fichero de puntos geográficos a utilizar en los mapas de comarcas
+#
 write_csv(capitales |>
   inner_join(censo_comarcal), 'data/capitals_comarcals.csv')
 
@@ -241,22 +266,28 @@ consumo_comarcal <- function(sector, fichero){
 }
 
 # obtenemos consumos comarcales para diferentes sectores
+# y generamos los ficheros csv de regiones a cargar en los mapas
 
 consumo_comarcal(3, 'data/comarcal_industrial.csv')
 consumo_comarcal(6, 'data/comarcal_terciario.csv')
 consumo_comarcal(5, 'data/comarcal_transporte.csv')
 
-consum |>
+consum_habitant <- consum |>
   filter(Codi_Sector == 7) |>
   inner_join(censo |>
                select(Any, Codi_Municipi, Habitants)) |>
   mutate(
-    kWh_dia_hab = kWh_dia / Habitants
+    kWh_dia_hab = round(kWh_dia / Habitants, digits = 2)
   ) |>
   select(Codi_Municipi, Any, kWh_dia_hab) |>
   arrange(Codi_Municipi, Any) |>
   pivot_wider(
     names_from = Any,
     values_from = kWh_dia_hab
-  ) 
+  ) |>
+  inner_join(municipios)
 
+#
+# generamos el csv a cargar en el mapa de municipios en flourish
+# 
+write_csv(consum_habitant, 'data/municipal_domestico.csv')
