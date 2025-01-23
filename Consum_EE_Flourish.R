@@ -1,4 +1,5 @@
 library(tidyverse)
+library(scales)
 
 comarcas <- read_csv("data/Comarcas-geometry.csv")
 
@@ -74,7 +75,8 @@ capitales <-
     Capital = Municipi
   )
 
-# Fichero de puntos que cargaremos en los mapas de comarcas
+#
+# Fichero de puntos que cargaremos en los mapas 
 #
 
 write_csv(capitales, 'data/capitals_comarcals.csv')
@@ -98,15 +100,16 @@ geometria |>
   full_join(municipios) |>
   filter(is.na(NOMMUNI) | is.na(Municipi))
 
+#
 # reescribimos el fichero para su recarga en Flourish con los codigos de municipio
 # homogeneizados
 write_csv(geometria |>
             mutate(
               CODIMUNI = str_sub(str_pad(CODIMUNI, width = 6, pad = 0), end = 5)
             ), 'data/Municipios5-geometry.csv')
-
+#
 # recogemos la extension del municipio en km2 y lo añadimos a municipios
-
+#
 municipios <- municipios |>
   inner_join(
     geometria |> 
@@ -120,10 +123,34 @@ municipios <- municipios |>
       )
   )
 
+#
+# NO podemos añadir a comarcas la Provincia
+# Las comarcas de la Selva, Berguedà, Osona y Cerdaña
+# tienen municipios en más de una provincia
+# Se descarta emplearlo como agrupacion en los mapas coropléticos
+#
+comarcas |>
+  inner_join(geometria |>
+               select(CODICOMAR, NOMPROV) |>
+               unique() |>
+               mutate(
+                 CODICOMAR = as.character(CODICOMAR)
+                 ) |>
+               rename(
+                 Codi_Comarca = CODICOMAR,
+                 Provincia = NOMPROV)
+  ) |>
+  count(Comarca) |>
+  filter(n > 1)
+
 # Cargamos el censo de cada una de las provincias catalanas
 
 carga_censo <- function(fichero, desde, hasta){
   censo <- read_csv2(fichero)
+
+  # Los datos del censo proporcionan la poblacion a 1 de enero
+  # por sexo y agregados (Total), así como agregados por provincia.
+  # Las provincias identificadas con un codigo de solo dos dígitos
   
   censo <- censo |>
     filter(Sexo == 'Total' & Periodo < hasta & Periodo > desde
@@ -140,9 +167,6 @@ carga_censo <- function(fichero, desde, hasta){
   censo
 }
 
-# Los datos del censo proporcionan la poblacion a 1 de enero
-# por sexo y agregados (total), así como agregados por provincia
-
 censo <-    carga_censo('data/2861.csv', 2013, 2024) |>
   bind_rows(carga_censo('data/2870.csv', 2013, 2024)) |>
   bind_rows(carga_censo('data/2878.csv', 2013, 2024)) |>
@@ -155,7 +179,6 @@ censo |>
 #
 # Realizamos un plot para ver la evolución del censo municipal
 #
-
 censo |>
   group_by(Any) |>
   summarise(Poblacion = trunc(sum(Habitants) / 1000)) |>
@@ -172,6 +195,7 @@ censo |>
     caption = 'Source: https://www.ine.es'
   )
 
+#
 # Añadimos a los municipios la poblaciona 1 de Enero de 2023
 #
 municipios <- municipios |>
@@ -180,6 +204,7 @@ municipios <- municipios |>
               select(Codi_Municipi, Habitants)
   )
 
+#
 # Comprobamos la inexistencia de nans
 #
 municipios |> 
@@ -195,6 +220,12 @@ censo <- censo |>
 # la variación de la población ha sido aproximadamente de un 6% en una década
 # emplear la variación por año para ajustar el tamaño de las capitales
 # no aporta significado. Nos quedamos unicamente con el censo a 1 de Ene de 2023
+
+censo_anual <- censo |>
+  group_by(Any)|>
+  summarise(
+    Poblacion = trunc(sum(Habitants) / 1000)
+  )
 
 censo_comarcal <- censo |>
   filter(Any == 2022) |>
@@ -225,6 +256,9 @@ attr(consum, 'names') <- c('Any', 'Provincia', 'Comarca',
 
 sectores <- consum |>
   select(Codi_Sector, Descripcio_Sector) |>
+  mutate(
+    Codi_Sector = as.character(Codi_Sector)
+  ) |>
   unique()
 
 # eliminamos nans y calculamos el consumo medio diario
@@ -239,10 +273,33 @@ consum <- consum |>
   select(Any, Codi_Municipi, Codi_Sector, kWh_dia ) |>
   na.omit() 
 
+#
+#  csv con los datos de consumo total por año, grafica final de la primera iteracion
+#  y con la que introduciremos los mapa coropleticos comarcales
+#
+
+write_csv(
+  consum |>
+    group_by(Any, Codi_Sector) |>
+    summarise(    
+      MWh_dia = round(sum(kWh_dia) / 1000, digits = 2)
+      ) |>
+    inner_join(sectores) |>
+    select(Any, MWh_dia, Descripcio_Sector) |>
+    pivot_wider(
+      values_from = MWh_dia,
+      names_from = Descripcio_Sector
+      ) |>
+    inner_join(censo_anual), 'data/consum-anual-sectores.csv')
+
 # comprobamos la NO existencia de GAPS en la codificacion de municipios
 
 consum |>
   filter(!Codi_Municipi %in% municipios$Codi_Municipi)
+
+#
+# Funcion para generar la hoja de regiones de consumos comarcales
+#
 
 consumo_comarcal <- function(sector, fichero){
   write_csv(
@@ -271,23 +328,139 @@ consumo_comarcal <- function(sector, fichero){
 consumo_comarcal(3, 'data/comarcal_industrial.csv')
 consumo_comarcal(6, 'data/comarcal_terciario.csv')
 consumo_comarcal(5, 'data/comarcal_transporte.csv')
+consumo_comarcal(7, 'data/comarcal_doméstico.csv')
 
-consum_habitant <- consum |>
-  filter(Codi_Sector == 7) |>
-  inner_join(censo |>
-               select(Any, Codi_Municipi, Habitants)) |>
-  mutate(
-    kWh_dia_hab = round(kWh_dia / Habitants, digits = 2)
-  ) |>
-  select(Codi_Municipi, Any, kWh_dia_hab) |>
-  arrange(Codi_Municipi, Any) |>
-  pivot_wider(
-    names_from = Any,
-    values_from = kWh_dia_hab
-  ) |>
-  inner_join(municipios)
 
 #
-# generamos el csv a cargar en el mapa de municipios en flourish
-# 
-write_csv(consum_habitant, 'data/municipal_domestico.csv')
+# Añadimos el consumo por habitante al conjunto inicial
+# eso nos permitirá trabajar con la nueva métrica
+#
+consum <- consum |>
+  inner_join(censo |>
+               select(Any, Codi_Municipi, Habitants)) |>
+  mutate(      
+    kWh_dia_hab = round(kWh_dia / Habitants, digits = 2)
+  ) 
+
+summary(consum)
+#
+# funcion para generar csv con los consumos / habitante
+# de los municipios
+#
+consum_habitant <- function(sector, fichero){
+  write_csv(
+    consum |>
+      filter(Codi_Sector == sector) |>
+      select(Codi_Municipi, Any, kWh_dia_hab) |>
+      arrange(Codi_Municipi, Any) |>
+      pivot_wider(
+        names_from = Any,
+        values_from = kWh_dia_hab
+        ) |>
+      inner_join(municipios), fichero)
+}
+  
+consum_habitant(7, 'data/municipal_domestico.csv')
+consum_habitant(6, 'data/municipal_terciario.csv')
+
+#
+# Obtenemos estadísticos para los sectores doméstico y terciario a fin de 
+# obtener valores con significado que acompañen al texto de las graficas 
+#
+consum |>
+  filter(Codi_Sector == 7) |>
+  group_by(Any) |>
+  summarise(
+    enframe(quantile(kWh_dia_hab, c(0.25, 0.5, 0.75)), "quantile", "kWh_dia_hab")
+    ) |>
+  pivot_wider(
+    names_from = quantile,
+    values_from = kWh_dia_hab
+  )
+
+#
+#  Realizamos un boxplot de la distribucion de consumos domesticos
+#
+consum |>
+  filter(Codi_Sector == 7) |>
+  ggplot(aes(y=kWh_dia_hab)) +
+    geom_boxplot(aes(x=as.factor(Any))) +
+  labs(
+    title = 'Distribución del consumo doméstico por Año',
+    subtitle = 'Se observa un gran número de municipios con un consumo por encima de la norma',
+    x = 'Año',
+    y = 'KWh / dia por habitante',
+    caption = 'Source: Institut Català d’Energia (ICAEN) http://dadesobertes.gencat.cat/'
+  )
+
+#
+# Y repetimos el ejercicio para el consumo del sector terciario 
+#
+
+consum |>
+  filter(Codi_Sector == 6) |>
+  group_by(Any) |>
+  summarise(
+    enframe(quantile(kWh_dia_hab, c(0.25, 0.5, 0.75)), "quantile", "kWh_dia_hab")
+  ) |>
+  pivot_wider(
+    names_from = quantile,
+    values_from = kWh_dia_hab
+  )
+
+consum |>
+  filter(Codi_Sector == 6) |>
+  ggplot(aes(y=kWh_dia_hab)) +
+  geom_boxplot(aes(x=as.factor(Any))) +
+  labs(
+    title = 'Distribución del consumo terciario por Año',
+    subtitle = 'Se observa un gran número de municipios con un consumo por encima de la norma',
+    x = 'Año',
+    y = 'KWh / dia por habitante',
+    caption = 'Source: Institut Català d’Energia (ICAEN) http://dadesobertes.gencat.cat/'
+  )
+
+
+#
+# Los cinco municipios con mayor consumo medio en la última década
+#
+
+consum |>
+  filter(Codi_Sector == 7 ) |>
+  group_by(Codi_Municipi) |>
+  summarise(
+    max = max(kWh_dia_hab, na.rm = TRUE),
+    avg = mean(kWh_dia_hab, na.rm = TRUE)
+  ) |>
+  arrange(desc(avg)) |>
+  head(5) |>
+  inner_join(municipios) 
+  
+consum |>
+  filter(Codi_Sector == 6 ) |>
+  group_by(Codi_Municipi) |>
+  summarise(
+    max = max(kWh_dia_hab, na.rm = TRUE),
+    avg = mean(kWh_dia_hab, na.rm = TRUE)
+  ) |>
+  arrange(desc(avg)) |>
+  head(5) |>
+  inner_join(municipios)
+
+
+consum |>
+  filter(Codi_Sector == 7 & kWh_dia_hab > 10) |>
+  select(Codi_Municipi) |>
+  unique() |>
+  count()
+
+
+consum |>
+  filter(Codi_Sector == 6 & kWh_dia_hab > 10) |>
+  select(Codi_Municipi) |>
+  unique() |>
+  count()
+  
+
+
+  
