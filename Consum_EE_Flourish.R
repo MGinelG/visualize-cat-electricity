@@ -447,20 +447,93 @@ consum |>
   head(5) |>
   inner_join(municipios)
 
+#
+# Generamos los datos para un buble plot en el que mostraremos
+# las burbujas del tamaño del consumo por habitante
+# y añadimos como referencia las capitales de comarca
+#
 
-consum |>
-  filter(Codi_Sector == 7 & kWh_dia_hab > 10) |>
-  select(Codi_Municipi) |>
-  unique() |>
-  count()
+#
+#  altos consumidores sector servicios
+top_service_consum <- 
+  consum |>
+  filter(Codi_Sector == 6 & kWh_dia_hab > 10 & Any == 2020) |>
+  select(Codi_Municipi, kWh_dia_hab) |>
+  mutate(Clase = 'consumer')
 
+#
+#  comprobamos la existencia de capitales entre los top_service_consumers
+#
+top_service_consum |>
+  rename(Codi_Capital = Codi_Municipi) |>
+  inner_join(capitales)
 
-consum |>
-  filter(Codi_Sector == 6 & kWh_dia_hab > 10) |>
-  select(Codi_Municipi) |>
-  unique() |>
-  count()
-  
+# ninguna capital de comarca en 2020 se encuentra en la lista de top consumers
+# ojo que si ampliamos la busqueda a toda la decada nos aparece la capital 
+# de Aran
+# de ser distinto las siguientes lineas de código tendrían que ser 
+# modificadas
 
+service_capital <- 
+  consum |>
+  filter(Codi_Sector == 6 & Any == 2020
+         & Codi_Municipi %in% capitales$Codi_Capital
+         ) |>
+  select(Codi_Municipi, kWh_dia_hab) |>
+  mutate(Clase = 'Capital')
 
-  
+top_service_consum |>
+  bind_rows(service_capital) |>
+  inner_join(municipios) |>
+  ggplot(aes(x = Longitud, y = Latitud)) +
+  geom_point(aes(color = Clase, size = kWh_dia_hab))
+
+#
+# salvamos los datos en un csv para su subida a Flourish
+#
+write_csv(
+  top_service_consum |>
+    bind_rows(service_capital) |>
+    inner_join(municipios), 'data/servicios_buble.csv'
+)
+
+top_domestic_consum <- 
+  consum |>
+  filter(Codi_Sector == 7 & kWh_dia_hab > 10 & Any == 2018) |>
+  select(Codi_Municipi, kWh_dia_hab) |>
+  mutate(Clase = 'consumer')
+
+#
+#  comprobamos la existencia de capitales entre los top_service_consumers
+#
+top_domestic_consum |>
+  rename(Codi_Capital = Codi_Municipi) |>
+  inner_join(capitales)
+
+# ninguna capital de comarca en 2018 se encuentra en la lista de top consumers
+# de ser distinto las siguientes lineas de código tendrían que ser 
+# modificadas
+
+domestic_capital <- 
+  consum |>
+  filter(Codi_Sector == 7 & Any == 2018
+         & Codi_Municipi %in% capitales$Codi_Capital
+  ) |>
+  select(Codi_Municipi, kWh_dia_hab) |>
+  mutate(Clase = 'Capital')
+
+top_domestic_consum |>
+  bind_rows(domestic_capital) |>
+  inner_join(municipios) |>
+  ggplot(aes(x = Longitud, y = Latitud)) +
+  geom_point(aes(color = Clase, size = kWh_dia_hab))
+
+#
+# salvamos los datos en un csv para su subida a Flourish
+#
+write_csv(
+  top_domestic_consum |>
+    bind_rows(domestic_capital) |>
+    inner_join(municipios), 'data/domestic_buble.csv'
+)
+
